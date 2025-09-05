@@ -1,0 +1,67 @@
+name: Python Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install watchdog
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run bot with live sync
+        run: |
+          cat > watcher.py <<'EOF'
+          import time, subprocess, os
+          from watchdog.observers import Observer
+          from watchdog.events import FileSystemEventHandler
+
+          class Handler(FileSystemEventHandler):
+              def on_modified(self, event):
+                  self.sync(event)
+
+              def on_created(self, event):
+                  self.sync(event)
+
+              def sync(self, event):
+                  # نتأكد أنه ملف مو مجلد
+                  if event.is_directory:
+                      return
+                  # نتأكد أنه بالـ root فقط
+                  if os.path.dirname(event.src_path) != os.getcwd():
+                      return
+                  print(f"📂 تغيير: {event.src_path}")
+                  time.sleep(5)  # تهدئة حتى يكتمل الحفظ
+                  subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
+                  subprocess.run(["git", "config", "--global", "user.email", "github-actions@github.com"])
+                  subprocess.run(["git", "add", "."])
+                  subprocess.run(["git", "commit", "-m", "Auto-sync file"])
+                  subprocess.run(["git", "push"])
+
+          observer = Observer()
+          observer.schedule(Handler(), path=".", recursive=False)
+          observer.start()
+
+          try:
+              subprocess.run(["python", "main.py"])
+          finally:
+              observer.stop()
+              observer.join()
+          EOF
+
+          python watcher.py
