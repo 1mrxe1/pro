@@ -11,8 +11,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -28,17 +26,18 @@ jobs:
       - name: Run bot
         run: python main.py
 
-      - name: Debug git
+      - name: Check for new files and commit
+        id: commit_files
         run: |
-          git status
-          git remote -v
-          ls -lh
-
-      - name: Commit and Push changes
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/2mrxe2/pro.git
-          git add .
-          git commit -m "Auto-update files [skip ci]" || echo "No changes to commit"
-          git push origin main
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Changes detected! Committing and pushing..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "Auto-save from bot run"
+            git push
+            echo "::set-output name=files_updated::true"
+          else
+            echo "No changes detected."
+            echo "::set-output name=files_updated::false"
+          fi
