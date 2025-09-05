@@ -1,0 +1,51 @@
+name: Python Bot
+
+on:
+  workflow_dispatch:   # تشغيل يدوي
+  schedule:
+    - cron: "0 */6 * * *"   # يعيد تشغيله كل 6 ساعات تلقائيًا
+
+permissions:
+  contents: write   # السماح بالـ git push
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # أقصى مدة (حوالي 6 ساعات)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run bot
+        run: python main.py
+
+      - name: Commit & Push root files only (with cooldown)
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          
+          # إضافة فقط الملفات من المسار الأساسي (root) بدون مجلدات
+          find . -maxdepth 1 -type f -exec git add {} \;
+          
+          # إذا في تغييرات، انتظر ثواني إضافية للتهدئة (تقدر تعدلها)
+          if ! git diff --cached --quiet; then
+            echo "Changes detected, waiting 10s cooldown..."
+            sleep 10
+            git commit -m "Auto-update root files"
+            git push
+          else
+            echo "No changes to commit."
+          fi
