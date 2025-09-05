@@ -1,0 +1,96 @@
+name: Python Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install watchdog gitpython
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # التصحيح المهم هنا:
+          git remote set-url origin https://${{ secrets.PAT }}@github.com/${{ github.repository }}.git
+
+      - name: Run bot with live sync
+        run: |
+          cat > watcher.py <<'EOF'
+          import time
+          import subprocess
+          import os
+          import git
+          from watchdog.observers import Observer
+          from watchdog.events import FileSystemEventHandler
+
+          class ChangeHandler(FileSystemEventHandler):
+              def __init__(self):
+                  self.repo = git.Repo('.')
+                  self.last_commit = self.repo.head.commit.hexsha
+                  
+              def on_modified(self, event):
+                  if not event.is_directory and os.path.dirname(event.src_path) == os.getcwd():
+                      self.sync_changes(event)
+                      
+              def on_created(self, event):
+                  if not event.is_directory and os.path.dirname(event.src_path) == os.getcwd():
+                      self.sync_changes(event)
+                      
+              def sync_changes(self, event):
+                  print(f"تم اكتشاف تغيير في: {os.path.basename(event.src_path)}")
+                  time.sleep(2)
+                  
+                  try:
+                      # جلب أحدث التغييرات أولاً
+                      self.repo.remotes.origin.pull()
+                      
+                      # إضافة الملفات المعدلة
+                      self.repo.git.add('.')
+                      
+                      # عمل commit إذا كانت هناك تغييرات
+                      if self.repo.is_dirty():
+                          self.repo.git.commit('-m', 'تحديث تلقائي للملفات')
+                          
+                          # دفع التغييرات
+                          origin = self.repo.remote(name='origin')
+                          origin.push()
+                          print("تم دفع التغييرات بنجاح")
+                          
+                  except Exception as e:
+                      print(f"خطأ في المزامنة: {str(e)}")
+
+          observer = Observer()
+          observer.schedule(ChangeHandler(), path='.', recursive=False)
+          observer.start()
+          print("بدأ المراقبة للتغييرات...")
+
+          try:
+              # تشغيل البوت الرئيسي
+              subprocess.run(['python', 'main.py'])
+          except Exception as e:
+              print(f"خطأ في تشغيل البوت: {str(e)}")
+          finally:
+              observer.stop()
+              observer.join()
+          EOF
+
+          python watcher.py
