@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -20,45 +22,51 @@ jobs:
       - name: Install dependencies
         run: |
           pip install watchdog
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run bot with live sync
         run: |
           cat > watcher.py <<'EOF'
-          import time, subprocess, os
+          import time
+          import subprocess
+          import os
           from watchdog.observers import Observer
           from watchdog.events import FileSystemEventHandler
 
-          class Handler(FileSystemEventHandler):
+          class ChangeHandler(FileSystemEventHandler):
               def on_modified(self, event):
-                  self.sync(event)
+                  self.sync_changes(event)
 
               def on_created(self, event):
-                  self.sync(event)
+                  self.sync_changes(event)
 
-              def sync(self, event):
-                  # نتأكد أنه ملف مو مجلد
+              def sync_changes(self, event):
+                  # Ignore directories and subdirectories
                   if event.is_directory:
                       return
-                  # نتأكد أنه بالـ root فقط
                   if os.path.dirname(event.src_path) != os.getcwd():
                       return
-                  print(f"📂 تغيير: {event.src_path}")
-                  time.sleep(5)  # تهدئة حتى يكتمل الحفظ
-                  subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
-                  subprocess.run(["git", "config", "--global", "user.email", "github-actions@github.com"])
+                  
+                  print(f"Detected change: {os.path.basename(event.src_path)}")
+                  time.sleep(3)
+                  
+                  # Auto-configure git
+                  subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"])
+                  subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"])
+                  
+                  # Sync with repository
                   subprocess.run(["git", "add", "."])
-                  subprocess.run(["git", "commit", "-m", "Auto-sync file"])
+                  subprocess.run(["git", "commit", "-m", "Auto-sync detected changes"])
                   subprocess.run(["git", "push"])
 
           observer = Observer()
-          observer.schedule(Handler(), path=".", recursive=False)
+          observer.schedule(ChangeHandler(), path=".", recursive=False)
           observer.start()
 
           try:
               subprocess.run(["python", "main.py"])
+          except KeyboardInterrupt:
+              pass
           finally:
               observer.stop()
               observer.join()
