@@ -23,18 +23,15 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        working-directory: pro # 👈 حدد مجلد العمل
         run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
+          pip install -r requirements.txt
+        working-directory: ${{ github.workspace }}
 
       - name: Run bot
-        working-directory: pro # 👈 حدد مجلد العمل
         run: python main.py
+        working-directory: ${{ github.workspace }}
 
       - name: Configure Git and commit changes
-        working-directory: pro # 👈 حدد مجلد العمل
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -46,3 +43,4 @@ jobs:
           else
             echo "No new changes to commit."
           fi
+        working-directory: ${{ github.workspace }}
