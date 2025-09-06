@@ -1,208 +1,59 @@
-name: Advanced Python Bot
+name: Python Bot
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # تشغيل يدوي
   schedule:
-    - cron: "0 */6 * * *"
-  push:
-    paths-ignore:
-      - 'main.py'
-      - '.github/workflows/**'
+    - cron: "0 */6 * * *"   # كل 6 ساعات
 
-env:
-  PYTHON_VERSION: '3.11'
-  MAX_RETRIES: 3
-  RETRY_DELAY: 30
+permissions:
+  contents: write   # لازم حتى يقدر يكتب للريبو
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    permissions:
-      contents: write
-      actions: write
-    
+
     steps:
-      # ----------------------------
-      # 1. التحضير الأولي (معدل)
-      # ----------------------------
-      - name: Checkout with enhanced settings
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-          persist-credentials: true
+          fetch-depth: 0   # مهم عشان يقدر يعمل push
 
-      - name: Setup Python with caching
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: requirements.txt
+          python-version: "3.11"
 
-      - name: Install dependencies with retry logic
+      - name: Install dependencies
         run: |
-          install_dependencies() {
-            if [ -f requirements.txt ]; then
-              pip install --upgrade pip
-              pip install -r requirements.txt
-            fi
-          }
-          
-          for i in $(seq 1 $MAX_RETRIES); do
-            if install_dependencies; then
-              echo "Dependencies installed successfully"
-              break
-            else
-              echo "Attempt $i failed, retrying in $RETRY_DELAY seconds..."
-              sleep $RETRY_DELAY
-            fi
-          done
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
 
-      # ----------------------------
-      # 2. التحضير للتنفيذ
-      # ----------------------------
-      - name: Create backup of main.py
-        id: backup
+      - name: Run bot
+        run: python main.py
+
+      - name: Commit generated files (only beside main.py)
         run: |
-          if [ -f main.py ]; then
-            cp main.py main.py.backup
-            echo "✅ Backup created"
+          set -e
+          MAIN_PATH="main.py"
+          MAIN_DIR="$(dirname "$MAIN_PATH")"
+          [ "$MAIN_DIR" = "." ] && MAIN_DIR="./"   # root
+
+          echo "Searching for changed files next to $MAIN_PATH"
+
+          # فقط الملفات بنفس مجلد main.py (ليست مجلدات)
+          files_to_add=$(find "$MAIN_DIR" -maxdepth 1 -type f ! -name "$(basename "$MAIN_PATH")")
+
+          if [ -n "$files_to_add" ]; then
+            echo "Files to add/commit:"
+            echo "$files_to_add"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add $files_to_add
+            git commit -m "chore(bot): update generated files [skip ci]" || echo "No changes to commit"
+            git push
           else
-            echo "❌ main.py not found!"
-            exit 1
+            echo "No files changed beside main.py"
           fi
-
-      # ----------------------------
-      # 3. تشغيل البوت
-      # ----------------------------
-      - name: Run bot with monitoring
-        id: run_bot
-        run: |
-          echo "🤖 Starting bot execution..."
-          start_time=$(date +%s)
-          
-          # تشغيل البوت مع timeout
-          timeout 350m python main.py
-          exit_code=$?
-          
-          end_time=$(date +%s)
-          execution_time=$((end_time - start_time))
-          
-          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
-          echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
-          
-          if [ $exit_code -eq 0 ]; then
-            echo "✅ Bot executed successfully"
-          elif [ $exit_code -eq 124 ]; then
-            echo "⏰ Bot execution timed out"
-          else
-            echo "❌ Bot execution failed with code: $exit_code"
-          fi
-
-      # ----------------------------
-      # 4. كشف التغييرات
-      # ----------------------------
-      - name: Detect changes in main.py
-        id: detect_changes
-        run: |
-          changes_detected=false
-          
-          # مقارنة الملف مع النسخة الاحتياطية
-          if [ -f main.py.backup ] && [ -f main.py ]; then
-            if ! cmp -s main.py.backup main.py; then
-              changes_detected=true
-              echo "🔄 Changes detected in main.py"
-              
-              # عرض التغييرات
-              echo "📋 Changes made:"
-              diff main.py.backup main.py || true
-            fi
-          fi
-          
-          if [ "$changes_detected" = "true" ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "✅ No changes detected"
-          fi
-          
-          # تنظيف النسخة الاحتياطية
-          rm -f main.py.backup
-
-      # ----------------------------
-      # 5. المزامنة مع GitHub
-      # ----------------------------
-      - name: Configure Git for push
-        if: steps.detect_changes.outputs.has_changes == 'true'
-        run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git remote -v
-          git status
-
-      - name: Commit and push changes
-        if: steps.detect_changes.outputs.has_changes == 'true'
-        run: |
-          # إضافة الملف المعدل
-          git add main.py
-          
-          # عمل commit
-          git commit -m "🤖 Auto-update: Bot modified main.py [skip ci]"
-          
-          # محاولة push مع retry
-          for attempt in {1..3}; do
-            if git push origin HEAD:${{ github.ref }}; then
-              echo "✅ Changes pushed successfully on attempt $attempt"
-              break
-            else
-              echo "⚠️ Push attempt $attempt failed"
-              if [ $attempt -lt 3 ]; then
-                sleep 10
-              else
-                echo "❌ All push attempts failed"
-                exit 1
-              fi
-            fi
-          done
-
-      # ----------------------------
-      # 6. التقارير والمراقبة
-      # ----------------------------
-      - name: Generate execution report
-        if: always()
-        run: |
-          echo "📊 === BOT EXECUTION REPORT ==="
-          echo "Execution time: ${{ steps.run_bot.outputs.execution_time }} seconds"
-          echo "Exit code: ${{ steps.run_bot.outputs.exit_code }}"
-          echo "Changes detected: ${{ steps.detect_changes.outputs.has_changes }}"
-          echo "Workflow: ${{ github.workflow }}"
-          echo "Run ID: ${{ github.run_id }}"
-          echo "Repository: ${{ github.repository }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "=============================="
-
-      # ----------------------------
-      # 7. التعامل مع الأخطاء
-      # ----------------------------
-      - name: Handle failures
-        if: failure()
-        run: |
-          echo "❌ Workflow failed at step: ${{ github.step }}"
-          echo "Please check the logs for details"
-
-  # ----------------------------
-  # 8. المراقبة الصحية
-  # ----------------------------
-  health-monitor:
-    runs-on: ubuntu-latest
-    needs: run-bot
-    if: always()
-    
-    steps:
-      - name: Analyze execution results
-        run: |
-          echo "🔍 Health Monitor Analysis"
-          echo "Bot job status: ${{ needs.run-bot.result }}"
-          echo "Execution time: ${{ needs.run-bot.outputs.execution_time }} seconds"
-          echo "Changes made: ${{ needs.run-bot.outputs.has_changes }}"
