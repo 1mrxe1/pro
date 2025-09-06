@@ -9,13 +9,12 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 👈 هذه الخطوة حيوية لتمكين الأكشن من الكتابة على الريبو
+      contents: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          # ضروري لسحب كل سجل التغييرات لضمان نجاح الـ push
           fetch-depth: 0
 
       - name: Setup Python
@@ -24,27 +23,24 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        working-directory: pro # 👈 حدد مجلد العمل
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
 
       - name: Run bot
+        working-directory: pro # 👈 حدد مجلد العمل
         run: python main.py
 
       - name: Configure Git and commit changes
+        working-directory: pro # 👈 حدد مجلد العمل
         run: |
-          # إعداد بيانات المستخدم للـ commit
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # إضافة كل الملفات المعدلة أو الجديدة في الريبو
           git add .
-
-          # التحقق من وجود تغييرات قبل الـ commit
           if ! git diff-index --quiet HEAD; then
             git commit -m "chore: Auto-save from bot run"
-            # استخدام GITHUB_TOKEN للمصادقة على الـ push
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
             echo "Changes committed and pushed successfully!"
           else
