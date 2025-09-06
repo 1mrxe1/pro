@@ -3,12 +3,12 @@ name: Python Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */6 * * *"  
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # سيوقف التنفيذ بعد 10 دقائق تلقائياً
+    timeout-minutes: 360  
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -24,12 +24,5 @@ jobs:
             pip install -r requirements.txt
           fi
 
-      - name: Run bot with timeout
-        run: |
-          # تشغيل البوت مع timeout نظام لمدة 10 دقائق (600 ثانية)
-          timeout 600s python main.py
-          
-          # إضافة خيار إضافي للتعامل مع الأخطاء
-          if [ $? -eq 124 ]; then
-            echo "تم إنهاء البوت بعد 10 دقائق كما هو مخطط"
-          fi
+      - name: Run bot
+        run: python main.py
