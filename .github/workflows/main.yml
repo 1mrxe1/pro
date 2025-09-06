@@ -1,0 +1,47 @@
+name: Python Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          # This is the key. Ensure a full history is fetched for the push command.
+          fetch-depth: 0
+          # We don't need a specific path, the default path is the repository root
+          
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run bot
+        run: python main.py
+
+      - name: Configure Git and commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .
+
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "chore: Auto-save from bot run"
+            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+            echo "Changes committed and pushed successfully!"
+          else
+            echo "No new changes to commit."
+          fi
