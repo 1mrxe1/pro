@@ -8,17 +8,15 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+    timeout-minutes: 360
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout code from the forked repository
+        uses: actions/checkout@v4
         with:
-          # This is the key. Ensure a full history is fetched for the push command.
+          # هذا سيقوم تلقائياً بالتحقق من الريبو الحالي (الفورك)
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-          # We don't need a specific path, the default path is the repository root
-          
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -26,22 +24,33 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
 
       - name: Run bot
         run: python main.py
 
-      - name: Configure Git and commit changes
+      - name: Check for modified main.py
+        id: check_files
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add .
-
-          if ! git diff-index --quiet HEAD; then
-            git commit -m "chore: Auto-save from bot run"
-            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
-            echo "Changes committed and pushed successfully!"
+          if git diff --name-only HEAD^ HEAD | grep -E '^main\.py$' > /dev/null; then
+            echo "main.py has been modified"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
           else
-            echo "No new changes to commit."
+            echo "No changes in main.py"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Configure Git for pushing
+        if: steps.check_files.outputs.has_changes == 'true'
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes
+        if: steps.check_files.outputs.has_changes == 'true'
+        run: |
+          git add main.py
+          git commit -m "Auto-update: Bot modified main.py during execution"
+          git push origin HEAD:${{ github.ref }}
