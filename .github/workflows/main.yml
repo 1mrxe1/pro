@@ -1,0 +1,66 @@
+name: Python Bot (Artifacts Test)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"   # كل 15 دقيقة
+
+permissions:
+  contents: write
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # تنزيل الملفات من الجوب السابق (إن وجدت)
+      - name: Download previous artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bot-data
+        continue-on-error: true   # ما يفشل إذا ماكو artifacts أول مرة
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      # تشغيل البوت وتخزين لوغاته + قتله قبل 30 ثانية
+      - name: Run bot with timed shutdown
+        run: |
+          echo "🚀 Starting bot..."
+          (sleep 870 && echo "🛑 Killing bot..." && pkill -f "python main.py") &
+          python main.py > bot.log 2>&1 || true
+
+      # طباعة لوغ البوت فقط
+      - name: Show bot logs
+        run: cat bot.log
+
+      # رفع الملفات كـ artifacts
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-data
+          path: |
+            *.session
+            *.db
+            *.json
+            *.png
+            *.jpg
+            *.jpeg
+            *.gif
+            *.bmp
+            *.webp
+            !main.py
+            bot.log
