@@ -36,11 +36,17 @@ jobs:
             pip install -r requirements.txt
           fi
 
-      # تشغيل البوت وتخزين لوغاته + قتله قبل 30 ثانية
+      # تشغيل البوت وتخزين لوغاته + قتله قبل دقيقة
       - name: Run bot with timed shutdown
         run: |
           echo "🚀 Starting bot..."
-          (sleep 870 && echo "🛑 Killing bot..." && pkill -f "python main.py") &
+          (
+            sleep 840  # 14 دقيقة
+            echo "🛑 Killing ALL Python processes..."
+            pkill python || true
+            sleep 5
+            pkill -9 python || true
+          ) &
           python main.py > bot.log 2>&1 || true
 
       # طباعة لوغ البوت فقط
