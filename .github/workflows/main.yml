@@ -1,56 +1,290 @@
-name: Python Bot
+name: Advanced Python Bot
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
+  push:
+    paths-ignore:
+      - 'main.py'
+      - '.github/workflows/**'
+
+env:
+  PYTHON_VERSION: '3.11'
+  MAX_RETRIES: 3
+  RETRY_DELAY: 30
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    permissions:
+      contents: write
+      actions: write
+    
     steps:
-      - name: Checkout code from the forked repository
+      # ----------------------------
+      # 1. التحضير الأولي
+      # ----------------------------
+      - name: Checkout with enhanced settings
         uses: actions/checkout@v4
         with:
-          # هذا سيقوم تلقائياً بالتحقق من الريبو الحالي (الفورك)
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          sparse-checkout: |
+            !.git
+            *
+          persist-credentials: true
 
-      - name: Setup Python
+      - name: Setup Python with caching
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
 
-      - name: Install dependencies
+      - name: Install dependencies with retry logic
         run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+          install_dependencies() {
+            if [ -f requirements.txt ]; then
+              pip install --upgrade pip
+              pip install -r requirements.txt
+            fi
+          }
+          
+          for i in $(seq 1 $MAX_RETRIES); do
+            if install_dependencies; then
+              echo "Dependencies installed successfully"
+              break
+            else
+              echo "Attempt $i failed, retrying in $RETRY_DELAY seconds..."
+              sleep $RETRY_DELAY
+            fi
+          done
+
+      # ----------------------------
+      # 2. تشغيل البوت مع مراقبة متقدمة
+      # ----------------------------
+      - name: Create execution environment
+        id: setup_env
+        run: |
+          # إنشاء بيئة تنفيذ معزولة
+          EXECUTION_DIR="/tmp/bot_execution_$(date +%s)"
+          mkdir -p $EXECUTION_DIR
+          cp -r . $EXECUTION_DIR/
+          cd $EXECUTION_DIR
+          
+          # حفظ البصمة الرقمية للملف
+          if [ -f main.py ]; then
+            sha256sum main.py > main.py.sha256.before
+            echo "execution_dir=$EXECUTION_DIR" >> $GITHUB_OUTPUT
+          else
+            echo "❌ main.py not found!"
+            exit 1
           fi
 
-      - name: Run bot
-        run: python main.py
-
-      - name: Check for modified main.py
-        id: check_files
+      - name: Run bot with monitoring
+        id: run_bot
         run: |
-          if git diff --name-only HEAD^ HEAD | grep -E '^main\.py$' > /dev/null; then
-            echo "main.py has been modified"
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+          cd ${{ steps.setup_env.outputs.execution_dir }}
+          
+          # تشغيل البوت مع تسجيل شامل
+          echo "🤖 Starting bot execution..."
+          start_time=$(date +%s)
+          
+          # استخدام timeout لمنع التجميد
+          timeout 350m python main.py 2>&1 | tee bot_execution.log
+          exit_code=${PIPESTATUS[0]}
+          
+          end_time=$(date +%s)
+          execution_time=$((end_time - start_time))
+          
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
+          
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Bot executed successfully"
           else
-            echo "No changes in main.py"
+            echo "❌ Bot execution failed with code: $exit_code"
+          fi
+
+      # ----------------------------
+      # 3. كشف التغييرات المتقدم
+      # ----------------------------
+      - name: Advanced change detection
+        id: detect_changes
+        run: |
+          cd ${{ steps.setup_env.outputs.execution_dir }}
+          
+          # التحقق من التغييرات بطرق متعددة
+          changes_detected=false
+          
+          # الطريقة 1: checksum comparison
+          if [ -f main.py.sha256.before ] && [ -f main.py ]; then
+            sha256sum -c main.py.sha256.before >/dev/null 2>&1 || changes_detected=true
+          fi
+          
+          # الطريقة 2: content comparison
+          if [ "$changes_detected" = "false" ] && [ -f main.py.original ]; then
+            if ! cmp -s main.py.original main.py; then
+              changes_detected=true
+            fi
+          fi
+          
+          # الطريقة 3: git status (للتحقق الإضافي)
+          if [ "$changes_detected" = "false" ]; then
+            git status --porcelain | grep -q "main.py" && changes_detected=true
+          fi
+          
+          if [ "$changes_detected" = "true" ]; then
+            echo "🔄 Changes detected in main.py"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            
+            # نسخ الملف المعدل إلى المسار الأصلي
+            cp main.py $GITHUB_WORKSPACE/main.py
+            
+            # تسجيل التغييرات
+            echo "📋 Change log:"
+            if [ -f main.py.original ]; then
+              diff -u main.py.original main.py || true
+            else
+              echo "Original file not available for diff"
+            fi
+          else
+            echo "✅ No changes detected"
             echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Configure Git for pushing
-        if: steps.check_files.outputs.has_changes == 'true'
-        run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+      # ----------------------------
+      # 4. المزامنة الذكية مع GitHub
+      # ----------------------------
+      - name: Smart GitHub synchronization
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+            
+            try {
+              // التحقق من التغييرات الحالية
+              const status = execSync('git status --porcelain').toString();
+              
+              if (status.includes('main.py')) {
+                console.log('📦 Preparing to commit changes...');
+                
+                // إعداد Git
+                execSync('git config --local user.name "github-actions[bot]"');
+                execSync('git config --local user.email "github-actions[bot]@users.noreply.github.com"');
+                
+                // إضافة الملفات
+                execSync('git add main.py');
+                
+                // عمل commit
+                const commitMessage = `🤖 Auto-update: Bot execution ${new Date().toISOString()}`;
+                execSync(`git commit -m "${commitMessage}"`);
+                
+                // Push مع retry logic
+                let pushSuccess = false;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                  try {
+                    execSync('git push origin HEAD:${{ github.ref }}');
+                    pushSuccess = true;
+                    console.log('✅ Changes pushed successfully');
+                    break;
+                  } catch (error) {
+                    console.log(`⚠️ Push attempt ${attempt} failed: ${error.message}`);
+                    if (attempt < 3) {
+                      await new Promise(resolve => setTimeout(resolve, 10000)); // 10s delay
+                    }
+                  }
+                }
+                
+                if (!pushSuccess) {
+                  console.log('❌ All push attempts failed');
+                }
+              } else {
+                console.log('ℹ️ No changes to commit');
+              }
+            } catch (error) {
+              console.log('❌ Error during synchronization:', error.message);
+            }
 
-      - name: Commit and push changes
-        if: steps.check_files.outputs.has_changes == 'true'
+      # ----------------------------
+      # 5. نظام المراقبة والتقارير
+      # ----------------------------
+      - name: Generate execution report
+        if: always()
         run: |
-          git add main.py
-          git commit -m "Auto-update: Bot modified main.py during execution"
-          git push origin HEAD:${{ github.ref }}
+          echo "📊 === BOT EXECUTION REPORT ==="
+          echo "Execution time: ${{ steps.run_bot.outputs.execution_time }} seconds"
+          echo "Exit code: ${{ steps.run_bot.outputs.exit_code }}"
+          echo "Changes detected: ${{ steps.detect_changes.outputs.has_changes }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "=============================="
+          
+          # حفظ التقرير كـ artifact
+          mkdir -p reports
+          cat > reports/execution_summary.md << EOF
+          # Bot Execution Summary
+          - **Timestamp**: $(date)
+          - **Duration**: ${{ steps.run_bot.outputs.execution_time }} seconds
+          - **Exit Code**: ${{ steps.run_bot.outputs.exit_code }}
+          - **Changes Made**: ${{ steps.detect_changes.outputs.has_changes }}
+          - **Workflow**: ${{ github.workflow }}
+          - **Run ID**: ${{ github.run_id }}
+          EOF
+
+      - name: Upload execution logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-execution-logs
+          path: |
+            ${{ steps.setup_env.outputs.execution_dir }}/bot_execution.log
+            reports/execution_summary.md
+          retention-days: 7
+
+      # ----------------------------
+      # 6. التنظيف الذكي
+      # ----------------------------
+      - name: Cleanup execution environment
+        if: always()
+        run: |
+          if [ -n "${{ steps.setup_env.outputs.execution_dir }}" ]; then
+            echo "🧹 Cleaning up execution environment..."
+            rm -rf "${{ steps.setup_env.outputs.execution_dir }}"
+          fi
+
+      # ----------------------------
+      # 7. التعامل مع الأخطاء
+      # ----------------------------
+      - name: Handle failures
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const message = `❌ Bot execution failed in workflow ${{ github.workflow }}`;
+            console.log(message);
+            
+            // يمكن إضافة إشعارات هنا (Slack, Discord, etc.)
+            // await github.rest.actions.createWorkflowDispatch({...});
+
+  # ----------------------------
+  # 8. وظيفة المراقبة الصحية
+  # ----------------------------
+  health-monitor:
+    runs-on: ubuntu-latest
+    needs: run-bot
+    if: always()
+    
+    steps:
+      - name: Analyze execution results
+        run: |
+          echo "🔍 Health Monitor Analysis"
+          echo "Bot job status: ${{ needs.run-bot.result }}"
+          echo "Execution time: ${{ needs.run-bot.outputs.execution_time }}"
+          echo "Changes made: ${{ needs.run-bot.outputs.has_changes }}"
