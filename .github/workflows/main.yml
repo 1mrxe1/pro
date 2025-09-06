@@ -1,12 +1,7 @@
-name: Python Bot (Artifacts Test)
+name: Python Bot (Stop Test)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/15 * * * *"   # كل 15 دقيقة
-
-permissions:
-  contents: write
 
 jobs:
   run-bot:
@@ -23,50 +18,33 @@ jobs:
         with:
           python-version: "3.11"
 
-      # تنزيل الملفات من الجوب السابق (إن وجدت)
-      - name: Download previous artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: bot-data
-        continue-on-error: true   # ما يفشل إذا ماكو artifacts أول مرة
-
       - name: Install dependencies
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
 
-      # تشغيل البوت وتخزين لوغاته + قتله قبل دقيقة
-      - name: Run bot with timed shutdown
+      # تشغيل البوت ثم إيقافه بعد 10 دقائق فقط
+      - name: Run bot with shutdown test
         run: |
           echo "🚀 Starting bot..."
-          (
-            sleep 840  # 14 دقيقة
-            echo "🛑 Killing ALL Python processes..."
-            pkill python || true
-            sleep 5
-            pkill -9 python || true
-          ) &
-          python main.py > bot.log 2>&1 || true
 
-      # طباعة لوغ البوت فقط
+          # 🟢 الطريقة 1: PID tracking
+          python main.py > bot.log 2>&1 &
+          BOT_PID=$!
+
+          sleep 600   # 10 دقائق
+
+          echo "🛑 Sending SIGTERM to bot..."
+          kill -TERM $BOT_PID || true
+          sleep 5
+          kill -9 $BOT_PID 2>/dev/null || true
+          echo "✅ Bot stopped (PID tracking)."
+
+          # 🟢 الطريقة 2: timeout (بديل)
+          # echo "🚀 Starting bot with timeout..."
+          # timeout -s TERM 600 python main.py > bot.log 2>&1 || true
+          # echo "✅ Bot stopped (timeout)."
+
       - name: Show bot logs
         run: cat bot.log
-
-      # رفع الملفات كـ artifacts
-      - name: Upload generated files
-        uses: actions/upload-artifact@v4
-        with:
-          name: bot-data
-          path: |
-            *.session
-            *.db
-            *.json
-            *.png
-            *.jpg
-            *.jpeg
-            *.gif
-            *.bmp
-            *.webp
-            !main.py
-            bot.log
