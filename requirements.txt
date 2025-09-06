@@ -1,5 +1,5 @@
 watchdog
-g4f
+g4f==0.2.7.3
 mutagen
 git+https://github.com/pytgcalls/pytgcalls        
 telethon
