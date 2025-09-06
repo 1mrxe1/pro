@@ -1,5 +1,5 @@
 watchdog
-git+https://github.com/xtekky/gpt4free.git
+g4f
 mutagen
 git+https://github.com/pytgcalls/pytgcalls        
 telethon
